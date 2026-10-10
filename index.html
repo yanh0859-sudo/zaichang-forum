@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="在场，真实职场人的匿名讨论现场。分享经历、交流薪资、寻求帮助。" />
+    <title>在场 · 匿名职场现场</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="forms.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-wrap">
+          <div class="brand-mark" aria-hidden="true">在</div>
+          <div><div class="brand-name">在场</div><div class="brand-sub">匿名职场现场</div></div>
+        </div>
+        <div class="top-actions">
+          <span class="live-indicator" id="liveIndicator">正在连接</span>
+          <button class="account-button" id="profileButton" type="button">登录 / 注册</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <aside class="sidebar">
+          <div class="identity-card">
+            <div class="avatar avatar-coral" aria-hidden="true">匿</div>
+            <div class="identity-copy"><strong id="identityName">未登录</strong><span id="identityHint">可以浏览，登录后匿名发言</span></div>
+          </div>
+          <div class="side-section channel-section">
+            <div class="section-label">现场频道</div>
+            <nav id="channelNav" aria-label="选择频道">
+              <button class="channel active" data-channel="all" aria-pressed="true"><span aria-hidden="true">◈</span> 全部现场</button>
+              <button class="channel" data-channel="吐槽" aria-pressed="false"><span aria-hidden="true">◌</span> 今日吐槽</button>
+              <button class="channel" data-channel="求助" aria-pressed="false"><span aria-hidden="true">?</span> 实时求助</button>
+              <button class="channel" data-channel="薪资" aria-pressed="false"><span aria-hidden="true">¥</span> 薪资讨论</button>
+              <button class="channel" data-channel="加班" aria-pressed="false"><span aria-hidden="true">◷</span> 加班与管理</button>
+              <button class="channel" data-channel="求职" aria-pressed="false"><span aria-hidden="true">↗</span> 裁员与求职</button>
+            </nav>
+          </div>
+          <div class="sidebar-footer">保持匿名，保持善意<br />不限制公司、地区或行业</div>
+        </aside>
+
+        <section class="feed-column" aria-labelledby="feedTitle">
+          <div class="feed-heading"><div><div class="eyebrow">真实职场人的匿名现场</div><h1 id="feedTitle">此刻，大家在聊什么</h1></div><span class="feed-sort">最新发布</span></div>
+          <div class="notice-bar"><span id="connectionStatus" role="status">正在加载内容…</span><button id="refreshReal" type="button">刷新</button></div>
+
+          <form class="composer" id="composerForm">
+            <label class="sr-only" for="postInput">发布内容，最多 180 字</label>
+            <div class="composer-top"><div class="avatar avatar-mint" aria-hidden="true">匿</div><textarea id="postInput" rows="3" placeholder="此刻发生了什么？匿名说说…" maxlength="180" required></textarea></div>
+            <div class="composer-bottom">
+              <div class="composer-options"><label for="postChannel">发布到</label><select id="postChannel" name="channel"><option value="吐槽">今日吐槽</option><option value="求助">实时求助</option><option value="薪资">薪资讨论</option><option value="加班">加班与管理</option><option value="求职">裁员与求职</option></select><span id="postCount">0/180</span></div>
+              <button class="post-button" type="submit">发布现场 ↗</button>
+            </div>
+          </form>
+
+          <div id="feed" class="feed" aria-busy="true"><div class="empty-state" id="feedMessage"><h2>正在加载</h2><p>正在连接论坛…</p></div></div>
+          <p class="feed-note" id="feedNote"></p>
+          <noscript><p class="empty-state">请启用浏览器 JavaScript 后使用论坛。</p></noscript>
+          <div class="community-info">
+            <details><summary>社区公约</summary><p>分享亲身经历，尊重不同观点。请勿发布他人姓名、联系方式、住址、公司机密、恶意攻击、诈骗或广告。遇到不当内容，请使用帖子下方的举报。</p></details>
+            <details><summary>匿名与隐私说明</summary><p>邮箱用于注册和登录，不展示在帖子里。发言使用固定的匿名昵称，同一账号的发言可以相互关联，并非完全不可识别。帖子和评论对访客公开，请勿填写能识别自己或他人的细节。账号和内容存储在本论坛使用的 Supabase 服务中。你可以删除自己发布的帖子及其评论。</p></details>
+          </div>
+        </section>
+
+        <aside class="right-rail" aria-label="发言建议">
+          <div class="rail-card"><div class="rail-title">一个真实的职场现场</div><p class="rail-note">从一条真实经历开始。聊聊工作里的困惑，也把自己的经验留给需要的人。</p></div>
+          <div class="rail-card"><div class="rail-title">发言前，保护好自己</div><p class="rail-note">不需要填写公司、地区和岗位。尽量省略可识别个人的细节，避免泄露自己或同事的隐私。</p></div>
+        </aside>
+      </main>
+    </div>
+    <dialog id="authDialog" aria-labelledby="authTitle" aria-describedby="authDescription">
+      <form id="authForm">
+        <h2 id="authTitle">登录 / 注册</h2><p id="authDescription">邮箱仅用于登录，不会展示在帖子里。</p>
+        <label for="authEmail">邮箱</label><input id="authEmail" name="email" type="email" required autocomplete="email" />
+        <label for="authPassword">密码（至少 8 位）</label><input id="authPassword" name="password" type="password" required minlength="8" autocomplete="current-password" />
+        <p id="authMessage" role="status"></p>
+        <div class="dialog-actions"><button name="mode" value="login" type="submit">登录</button><button name="mode" value="signup" type="submit">注册</button><button type="button" id="closeAuth" class="secondary-button">关闭</button></div>
+      </form>
+    </dialog>
+    <div class="toast" id="toast" role="status"></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
