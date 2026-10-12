@@ -7,15 +7,49 @@ const feed = $('#feed');
 const authDialog = $('#authDialog');
 const cards = new Map();
 const commentLoads = new Map();
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const requestedPostId = new URLSearchParams(window.location.search).get('post');
+const sharedPostId = UUID_PATTERN.test(requestedPostId || '') ? requestedPostId.toLowerCase() : null;
+const viewedPosts = new Set();
 let user = null;
 let posts = [];
 let channel = 'all';
 let loaded = false;
 let loadFailed = false;
+let latestWindowFull = false;
 let loadSequence = 0;
 let realtimeStatus = 'CONNECTING';
 let refreshTimer;
 let db = null;
+let sharedPostFocused = false;
+
+function randomUuid() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  return [...bytes].map((byte, index) => `${index === 4 || index === 6 || index === 8 || index === 10 ? '-' : ''}${byte.toString(16).padStart(2, '0')}`).join('');
+}
+
+function eventSessionId() {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const stored = localStorage.getItem('zaichang_event_session');
+    if (UUID_PATTERN.test(stored || '')) {
+      const migrated = { day: today, id: stored.toLowerCase() };
+      localStorage.setItem('zaichang_event_session', JSON.stringify(migrated));
+      return migrated.id;
+    }
+    let current = null;
+    try { current = JSON.parse(stored || 'null'); } catch { /* Replace malformed legacy values below. */ }
+    if (current?.day === today && UUID_PATTERN.test(current.id || '')) return current.id;
+    const next = { day: today, id: randomUuid() };
+    localStorage.setItem('zaichang_event_session', JSON.stringify(next));
+    return next.id;
+  } catch {
+    return randomUuid();
+  }
+}
 
 function notify(message) {
   $('#toast').textContent = message;
@@ -42,6 +76,181 @@ try {
   if (url && key) db = createClient(url, key);
 } catch {
   // A malformed public configuration should render an explanation, not a blank page.
+}
+
+async function trackForumEvent(eventName, postId = null) {
+  if (!db) return;
+  try {
+    await db.rpc('record_forum_event', {
+      p_event_name: eventName,
+      p_session_id: eventSessionId(),
+      p_post_id: postId,
+    });
+  } catch {
+    // Analytics must never interrupt reading, posting, or sharing.
+  }
+}
+
+const postObserver = 'IntersectionObserver' in window ? new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    const postId = entry.target.dataset.id;
+    if (!entry.isIntersecting || entry.intersectionRatio < 0.25 || viewedPosts.has(postId)) continue;
+    viewedPosts.add(postId);
+    postObserver.unobserve(entry.target);
+    trackForumEvent('post_view', postId);
+  }
+}, { threshold: 0.25 }) : null;
+
+function postShareUrl(postId) {
+  const url = new URL(window.location.href);
+  url.search = '';
+  url.hash = '';
+  url.searchParams.set('post', postId);
+  return url.toString();
+}
+
+function authRedirectUrl() {
+  const url = new URL(window.location.href);
+  url.hash = '';
+  url.search = '';
+  if (sharedPostId) url.searchParams.set('post', sharedPostId);
+  return url.toString();
+}
+
+async function copyText(value) {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(value);
+    return true;
+  }
+  const input = document.createElement('textarea');
+  input.value = value;
+  input.setAttribute('readonly', '');
+  input.style.position = 'fixed';
+  input.style.opacity = '0';
+  document.body.append(input);
+  input.select();
+  const copied = document.execCommand('copy');
+  input.remove();
+  return copied;
+}
+
+async function sharePost(card) {
+  const url = postShareUrl(card.dataset.id);
+  const body = card.querySelector('.post-body').textContent.trim();
+  const shareData = { title: '在场 · 匿名职场现场', text: body, url };
+  const canUseNativeShare = Boolean(navigator.share);
+  try {
+    if (canUseNativeShare) await navigator.share(shareData);
+    else if (!await copyText(url)) throw new Error('copy failed');
+    trackForumEvent('post_share', card.dataset.id);
+    notify(canUseNativeShare ? '已打开分享。' : '分享链接已复制。');
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    try {
+      if (await copyText(url)) {
+        trackForumEvent('post_share', card.dataset.id);
+        notify('分享链接已复制。');
+        return;
+      }
+    } catch {
+      // The manual-copy prompt below remains available on older browsers.
+    }
+    window.prompt('请复制这条分享链接：', url);
+  }
+}
+
+function wrappedCanvasLines(context, text, maxWidth, maxLines) {
+  const lines = [];
+  for (const paragraph of text.split(/\n+/)) {
+    let line = '';
+    for (const character of paragraph) {
+      const next = line + character;
+      if (line && context.measureText(next).width > maxWidth) {
+        lines.push(line);
+        line = character;
+        if (lines.length === maxLines) break;
+      } else {
+        line = next;
+      }
+    }
+    if (lines.length === maxLines) break;
+    if (line) lines.push(line);
+    if (lines.length === maxLines) break;
+  }
+  if (lines.length === maxLines && lines.join('').length < text.replace(/\n/g, '').length) {
+    lines[maxLines - 1] = `${lines[maxLines - 1].replace(/[，。！？；、,.!?;\s]*$/, '')}…`;
+  }
+  return lines;
+}
+
+async function sharePostImage(card) {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1080;
+    canvas.height = 1350;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('canvas unavailable');
+    const body = card.querySelector('.post-body').textContent.trim();
+    const channelName = card.dataset.channel;
+    context.fillStyle = '#f7f7f5';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = '#202225';
+    context.fillRect(0, 0, canvas.width, 190);
+    context.fillStyle = '#ffffff';
+    context.font = '700 64px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif';
+    context.fillText('在场', 82, 112);
+    context.fillStyle = '#bde5d4';
+    context.font = '400 28px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif';
+    context.fillText('匿名职场现场', 270, 111);
+    context.fillStyle = '#e7654f';
+    context.fillRect(82, 258, 12, 46);
+    context.fillStyle = '#59605c';
+    context.font = '600 30px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif';
+    context.fillText(channelName, 120, 294);
+    context.fillStyle = '#202225';
+    context.font = '600 52px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif';
+    const lines = wrappedCanvasLines(context, body, 916, 10);
+    lines.forEach((line, index) => context.fillText(line, 82, 405 + index * 76));
+    context.strokeStyle = '#d9ddda';
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(82, 1160);
+    context.lineTo(998, 1160);
+    context.stroke();
+    context.fillStyle = '#59605c';
+    context.font = '400 28px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif';
+    context.fillText('真实经历，匿名交流', 82, 1230);
+    context.fillStyle = '#202225';
+    context.font = '600 28px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif';
+    context.fillText('zaichang-forum.vercel.app', 82, 1285);
+    const dataUrl = canvas.toDataURL('image/png');
+    const binary = atob(dataUrl.split(',')[1]);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const blob = new Blob([bytes], { type: 'image/png' });
+    const file = new File([blob], `在场-${card.dataset.id.slice(0, 8)}.png`, { type: 'image/png' });
+    const canShareFile = Boolean(navigator.share && navigator.canShare?.({ files: [file] }));
+    if (canShareFile) {
+      try {
+        await navigator.share({ title: '在场 · 匿名职场现场', text: `${body}\n${postShareUrl(card.dataset.id)}`, files: [file] });
+        trackForumEvent('share_image', card.dataset.id);
+        return;
+      } catch (error) {
+        if (error?.name === 'AbortError') return;
+      }
+    }
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = file.name;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+    trackForumEvent('share_image_saved', card.dataset.id);
+    notify('分享图已保存。');
+  } catch (error) {
+    if (error?.name !== 'AbortError') notify('暂时无法生成分享图，请改用分享链接。');
+  }
 }
 
 function updateConnection() {
@@ -84,8 +293,9 @@ function makeCard(post) {
   card.dataset.id = post.id;
   card.dataset.channel = post.channel;
   card.dataset.owner = post.user_id;
-  card.innerHTML = `<div class="post-meta"><div class="avatar avatar-mint" aria-hidden="true">匿</div><div class="post-author"><strong>${esc(post.nickname)}</strong><span>${esc(post.channel)}</span></div><time class="post-time" datetime="${esc(post.created_at)}">${esc(new Date(post.created_at).toLocaleString('zh-CN'))}</time></div><div class="post-body">${esc(post.body)}</div><div class="post-actions"><button type="button" data-action="comments" class="action-button" aria-expanded="false" aria-controls="comments-${esc(post.id)}">查看 / 回复</button><button type="button" data-action="report" class="action-button">举报</button><button type="button" data-action="delete" class="action-button" hidden>删除我的帖子</button></div><section class="comments" id="comments-${esc(post.id)}" aria-label="评论" hidden><div class="comment-list"></div><p class="comment-status" role="status"></p><button class="action-button" type="button" data-action="refresh-comments">刷新评论</button><form class="reply-form"><label class="sr-only" for="reply-${esc(post.id)}">匿名回复，最多 1000 字</label><textarea id="reply-${esc(post.id)}" name="body" placeholder="匿名回应…" rows="2" required maxlength="1000"></textarea><button type="submit">回复</button></form></section>`;
+  card.innerHTML = `<div class="post-meta"><div class="avatar avatar-mint" aria-hidden="true">匿</div><div class="post-author"><strong>${esc(post.nickname)}</strong><span>${esc(post.channel)}</span></div><time class="post-time" datetime="${esc(post.created_at)}">${esc(new Date(post.created_at).toLocaleString('zh-CN'))}</time></div><div class="post-body">${esc(post.body)}</div><div class="post-actions"><button type="button" data-action="comments" class="action-button" aria-expanded="false" aria-controls="comments-${esc(post.id)}">查看 / 回复</button><button type="button" data-action="share" class="action-button">分享链接</button><button type="button" data-action="share-image" class="action-button">生成分享图</button><button type="button" data-action="report" class="action-button">举报</button><button type="button" data-action="delete" class="action-button" hidden>删除我的帖子</button></div><section class="comments" id="comments-${esc(post.id)}" aria-label="评论" hidden><div class="comment-list"></div><p class="comment-status" role="status"></p><button class="action-button" type="button" data-action="refresh-comments">刷新评论</button><form class="reply-form"><label class="sr-only" for="reply-${esc(post.id)}">匿名回复，最多 1000 字</label><textarea id="reply-${esc(post.id)}" name="body" placeholder="匿名回应…" rows="2" required maxlength="1000"></textarea><button type="submit">回复</button></form></section>`;
   updateActions(card, post);
+  postObserver?.observe(card);
   return card;
 }
 
@@ -100,13 +310,39 @@ function showFeedMessage(title, description) {
   message.innerHTML = `<h2>${esc(title)}</h2><p>${esc(description)}</p>`;
 }
 
+function revealSharedPost(found) {
+  const notice = $('#sharedViewNotice');
+  notice.hidden = !sharedPostId;
+  if (!sharedPostId) return;
+  const text = notice.querySelector('span');
+  if (!found) {
+    text.textContent = '这条分享内容已删除、已隐藏或不存在';
+    return;
+  }
+  text.textContent = '正在查看一条分享内容';
+  const card = cards.get(sharedPostId);
+  if (!card || sharedPostFocused) return;
+  if (!viewedPosts.has(sharedPostId)) {
+    viewedPosts.add(sharedPostId);
+    postObserver?.unobserve(card);
+    trackForumEvent('post_view', sharedPostId);
+  }
+  sharedPostFocused = true;
+  card.classList.add('is-shared');
+  const comments = card.querySelector('.comments');
+  const commentsButton = card.querySelector('[data-action="comments"]');
+  comments.hidden = false;
+  commentsButton.setAttribute('aria-expanded', 'true');
+  loadComments(card);
+  requestAnimationFrame(() => card.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+}
+
 function renderPosts() {
   $('#feedMessage')?.remove();
   const currentIds = new Set(posts.map((post) => post.id));
   for (const [id, card] of cards) {
     if (!currentIds.has(id)) {
-      // Preserve replies to older posts that leave the 100-post window.
-      if (card.querySelector('.reply-form textarea').value.trim() && posts.length === 100) continue;
+      postObserver?.unobserve(card);
       card.remove();
       cards.delete(id);
     }
@@ -134,7 +370,7 @@ function renderPosts() {
   if (![...cards.values()].some((card) => !card.hidden)) {
     showFeedMessage('这里还没有发言', '分享一段真实经历，开启这个频道的讨论。');
   }
-  $('#feedNote').textContent = posts.length === 100 ? '当前展示全站最新 100 条帖子。' : '';
+  $('#feedNote').textContent = latestWindowFull ? '当前展示全站最新 100 条帖子。' : '';
 }
 
 async function loadPosts() {
@@ -150,10 +386,19 @@ async function loadPosts() {
     const { data, error } = await db.from('posts').select('id,user_id,nickname,channel,body,created_at').order('created_at', { ascending: false }).limit(100);
     if (sequence !== loadSequence) return;
     if (error) throw error;
-    posts = data;
+    const nextPosts = data || [];
+    latestWindowFull = nextPosts.length === 100;
+    if (sharedPostId && !nextPosts.some((post) => post.id === sharedPostId)) {
+      const shared = await db.from('posts').select('id,user_id,nickname,channel,body,created_at').eq('id', sharedPostId).maybeSingle();
+      if (sequence !== loadSequence) return;
+      if (shared.error) throw shared.error;
+      if (shared.data) nextPosts.unshift(shared.data);
+    }
+    posts = nextPosts;
     loaded = true;
     loadFailed = false;
     renderPosts();
+    revealSharedPost(posts.some((post) => post.id === sharedPostId));
   } catch (error) {
     if (sequence !== loadSequence) return;
     loadFailed = true;
@@ -197,7 +442,7 @@ $('#authForm').addEventListener('submit', async (event) => {
   form.querySelectorAll('[type="submit"]').forEach((button) => { button.disabled = true; });
   $('#authMessage').textContent = signingUp ? '正在注册…' : '正在登录…';
   try {
-    const { data, error } = signingUp ? await db.auth.signUp({ ...credentials, options: { emailRedirectTo: window.location.origin } }) : await db.auth.signInWithPassword(credentials);
+    const { data, error } = signingUp ? await db.auth.signUp({ ...credentials, options: { emailRedirectTo: authRedirectUrl() } }) : await db.auth.signInWithPassword(credentials);
     if (error) throw error;
     $('#authPassword').value = '';
     if (data.session) {
@@ -230,6 +475,20 @@ $('#profileButton').addEventListener('click', async () => {
 });
 
 $('#postInput').addEventListener('input', () => { $('#postCount').textContent = `${$('#postInput').value.length}/180`; });
+$('.topic-radar').addEventListener('click', (event) => {
+  const topic = event.target.closest('[data-topic]');
+  if (!topic) return;
+  if ($('#postInput').value.trim()) {
+    notify('请先发布或清空正在编辑的内容。');
+    $('#postInput').focus();
+    return;
+  }
+  $('#postInput').value = topic.dataset.topic;
+  $('#postChannel').value = topic.dataset.topicChannel;
+  $('#postCount').textContent = `${$('#postInput').value.length}/180`;
+  $('#postInput').focus();
+  $('#postInput').scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
 $('#composerForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!user) return showAuth();
@@ -277,8 +536,11 @@ $('#channelNav').addEventListener('click', (event) => {
 feed.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-action]');
   const card = event.target.closest('[data-id]');
-  if (!button || !card || !db) return;
+  if (!button || !card) return;
   const action = button.dataset.action;
+  if (action === 'share') return sharePost(card);
+  if (action === 'share-image') return sharePostImage(card);
+  if (!db) return;
   if (action === 'comments') {
     const section = card.querySelector('.comments');
     section.hidden = !section.hidden;
@@ -305,6 +567,7 @@ feed.addEventListener('click', async (event) => {
     try {
       const { error } = await db.from('posts').delete().eq('id', card.dataset.id).eq('user_id', user.id);
       if (error) throw error;
+      postObserver?.unobserve(card);
       card.remove();
       cards.delete(card.dataset.id);
       await loadPosts();
@@ -345,6 +608,7 @@ $('#refreshReal').addEventListener('click', refreshAll);
 window.addEventListener('offline', updateConnection);
 window.addEventListener('online', () => { updateConnection(); refreshAll(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && loaded) refreshAll(); });
+setInterval(() => { if (!document.hidden && loaded && navigator.onLine) loadPosts(); }, 60000);
 
 if (db) {
   db.auth.onAuthStateChange((_event, session) => {
@@ -354,7 +618,9 @@ if (db) {
   db.channel('forum')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, (payload) => {
       if (payload.eventType === 'DELETE' && payload.old?.id) {
-        cards.get(payload.old.id)?.remove();
+        const deletedCard = cards.get(payload.old.id);
+        if (deletedCard) postObserver?.unobserve(deletedCard);
+        deletedCard?.remove();
         cards.delete(payload.old.id);
       }
       clearTimeout(refreshTimer);
@@ -373,4 +639,5 @@ if (db) {
     });
 }
 updateConnection();
+trackForumEvent('site_visit');
 loadPosts();

@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="在场，真实职场人的匿名讨论现场。分享经历、交流薪资、寻求帮助。" />
+    <meta name="theme-color" content="#f7f7f5" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:site_name" content="在场" />
+    <meta property="og:title" content="在场 · 匿名职场现场" />
+    <meta property="og:description" content="分享真实职场经历，匿名交流、求助与讨论。" />
     <title>在场 · 匿名职场现场</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="forms.css" />
@@ -44,6 +50,16 @@
         <section class="feed-column" aria-labelledby="feedTitle">
           <div class="feed-heading"><div><div class="eyebrow">真实职场人的匿名现场</div><h1 id="feedTitle">此刻，大家在聊什么</h1></div><span class="feed-sort">最新发布</span></div>
           <div class="notice-bar"><span id="connectionStatus" role="status">正在加载内容…</span><button id="refreshReal" type="button">刷新</button></div>
+          <div class="shared-view-notice" id="sharedViewNotice" hidden><span>正在查看一条分享内容</span><a href="/">返回最新讨论</a></div>
+          <section class="topic-radar" aria-labelledby="topicRadarTitle">
+            <div class="topic-radar-heading"><strong id="topicRadarTitle">近期热议</strong><span>站务选题，不代表用户发言</span></div>
+            <div class="topic-radar-list">
+              <button type="button" data-topic="调休后返工，最影响你的是睡眠、通勤还是家庭安排？" data-topic-channel="加班">调休后返工</button>
+              <button type="button" data-topic="工作量和零失误之间，绩效与奖金怎样分才公平？" data-topic-channel="薪资">绩效怎么才公平</button>
+              <button type="button" data-topic="AI已经减少、替代或增加了你工作中的哪些具体任务？" data-topic-channel="求助">AI改变了哪些工作</button>
+              <button type="button" data-topic="不喜欢现在的工作，又担心辞职后找不到，怎样判断该不该走？" data-topic-channel="求职">想离职又怕找不到</button>
+            </div>
+          </section>
 
           <form class="composer" id="composerForm">
             <label class="sr-only" for="postInput">发布内容，最多 180 字</label>
@@ -59,7 +75,7 @@
           <noscript><p class="empty-state">请启用浏览器 JavaScript 后使用论坛。</p></noscript>
           <div class="community-info">
             <details><summary>社区公约</summary><p>分享亲身经历，尊重不同观点。请勿发布他人姓名、联系方式、住址、公司机密、恶意攻击、诈骗或广告。遇到不当内容，请使用帖子下方的举报。</p></details>
-            <details><summary>匿名与隐私说明</summary><p>邮箱用于注册和登录，不展示在帖子里。发言使用固定的匿名昵称，同一账号的发言可以相互关联，并非完全不可识别。帖子和评论对访客公开，请勿填写能识别自己或他人的细节。账号和内容存储在本论坛使用的 Supabase 服务中。你可以删除自己发布的帖子及其评论。</p></details>
+            <details><summary>匿名与隐私说明</summary><p>邮箱用于注册和登录，不展示在帖子里。发言使用固定的匿名昵称，同一账号的发言可以相互关联，并非完全不可识别。帖子和评论对访客公开，请勿填写能识别自己或他人的细节。账号和内容存储在本论坛使用的 Supabase 服务中。网站使用每日轮换的随机浏览器标识记录按日去重的访问、帖子浏览和分享趋势，不记录邮箱、帖子正文或跨站浏览活动。你可以删除自己发布的帖子及其评论。</p></details>
           </div>
         </section>
 
